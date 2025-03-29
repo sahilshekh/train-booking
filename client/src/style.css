@@ -1,6 +1,30 @@
-.container {
+body {
+    font-family: Arial, sans-serif;
+  }
+  
+  .container {
     max-width: 800px;
     margin: 0 auto;
     padding: 20px;
     text-align: center;
+  }
+  
+  .seat-row {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 5px;
+  }
+  
+  .seat {
+    width: 35px;
+    height: 35px;
+    border: 1px solid #333;
+    background-color: #ccc;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  
+  .seat.booked {
+    background-color: #ff4444;
+    cursor: not-allowed;
   }
