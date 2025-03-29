@@ -74,9 +74,15 @@ app.post('/api/login', async (req, res) => {
   }
   try {
     const user = await User.findOne({ username });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username' });
     }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
@@ -86,8 +92,15 @@ app.post('/api/login', async (req, res) => {
 
 // Middleware for authentication
 function authMiddleware(req, res, next) {
-  const token = req.headers['authorization'];
-  if (!token) return res.status(401).json({ error: 'No token' });
+  const authHeader = req.headers['authorization'];
+  console.log('Authorization Header:', authHeader); // Debugging log
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+  
+  const token = authHeader.split(' ')[1];
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
     req.userId = decoded.userId;
@@ -97,10 +110,57 @@ function authMiddleware(req, res, next) {
   }
 }
 
-app.get('/api/protected', authMiddleware, (req, res) => {
-    res.json({ message: `Welcome user ${req.userId}, you're authenticated!` });
-  });
-  
+// Get available seats
+app.get('/api/seats', async (req, res) => {
+  try {
+    const seats = await Seat.find({ isBooked: false });
+    res.json(seats);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch seats' });
+  }
+});
+
+// Book seats
+app.post('/api/book', authMiddleware, async (req, res) => {
+  const { numSeats } = req.body;
+  const userId = req.userId;
+
+  if (!numSeats || numSeats > 7 || numSeats < 1) {
+    return res.status(400).json({ error: 'Invalid number of seats' });
+  }
+
+  try {
+    // Check for a row with enough seats
+    const rows = await Seat.aggregate([
+      { $match: { isBooked: false } },
+      { $group: { _id: '$rowNumber', count: { $sum: 1 } } },
+      { $match: { count: { $gte: numSeats } } },
+      { $limit: 1 },
+    ]);
+
+    if (rows.length > 0) {
+      const row = rows[0]._id;
+      const seatsToBook = await Seat.find({ rowNumber: row, isBooked: false }).limit(numSeats);
+      await Seat.updateMany(
+        { _id: { $in: seatsToBook.map(s => s._id) } },
+        { isBooked: true, userId }
+      );
+      res.json({ message: 'Seats booked in row ' + row, seats: seatsToBook });
+    } else {
+      const availableSeats = await Seat.find({ isBooked: false }).limit(numSeats);
+      if (availableSeats.length < numSeats) {
+        return res.status(400).json({ error: 'Not enough seats available' });
+      }
+      await Seat.updateMany(
+        { _id: { $in: availableSeats.map(s => s._id) } },
+        { isBooked: true, userId }
+      );
+      res.json({ message: 'Nearby seats booked', seats: availableSeats });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to book seats' });
+  }
+});
 
 // Start Server
 const PORT = process.env.PORT || 5000;
