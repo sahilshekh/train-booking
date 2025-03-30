@@ -11,7 +11,7 @@ function SeatMap({ token, onBook, bookedSeats, refreshTrigger }) {
 
   const fetchSeats = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/seats');
+      const res = await fetch('https://trainbookingbackend.vercel.app/api/seats');
       const data = await res.json();
       setSeats(data);
     } catch (err) {

@@ -24,7 +24,7 @@ function App() {
 
   const fetchBookedSeats = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/my-seats', {
+      const res = await axios.get('https://trainbookingbackend.vercel.app/api/my-seats', {
         headers: { Authorization: `Bearer ${token}` },
       });
       setBookedSeats(res.data);
@@ -35,7 +35,7 @@ function App() {
 
   const fetchSeatCounts = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/seats');
+      const res = await axios.get('https://trainbookingbackend.vercel.app/api/seats');
       const seats = res.data;
       const bookedCount = seats.filter(seat => seat.isBooked).length;
       setTotalBooked(bookedCount);
@@ -47,7 +47,7 @@ function App() {
 
   const handleSignup = async () => {
     try {
-      await axios.post('http://localhost:5000/api/signup', { username, password });
+      await axios.post('https://trainbookingbackend.vercel.app/api/signup', { username, password });
       toast.success('Signup successful! Please log in.');
     } catch (err) {
       toast.error('Signup failed: ' + (err.response?.data?.error || 'Unknown error'));
@@ -56,7 +56,7 @@ function App() {
 
   const handleLogin = async () => {
     try {
-      const res = await axios.post('http://localhost:5000/api/login', { username, password });
+      const res = await axios.post('https://trainbookingbackend.vercel.app/api/login', { username, password });
       setToken(res.data.token);
       toast.success('Login successful!');
     } catch (err) {
@@ -71,7 +71,7 @@ function App() {
     }
     try {
       const res = await axios.post(
-        'http://localhost:5000/api/book',
+        'https://trainbookingbackend.vercel.app/api/book',
         { seatIds: selectedSeatIds },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -92,7 +92,7 @@ function App() {
     }
     try {
       const res = await axios.post(
-        'http://localhost:5000/api/book-auto',
+        'https://trainbookingbackend.vercel.app/api/book-auto',
         { numSeats },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -109,7 +109,7 @@ function App() {
   const handleReset = async () => {
     try {
       const res = await axios.post(
-        'http://localhost:5000/api/reset',
+        'https://trainbookingbackend.vercel.app/api/reset',
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
