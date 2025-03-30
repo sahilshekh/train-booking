@@ -1,4 +1,4 @@
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -9,17 +9,20 @@ const User = require('./models/User');
 const app = express();
 app.use(express.json());
 
-// CORS for React client
+// CORS middleware with preflight support
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-  res.header('Access-Control-Allow-Methods', 'GET, POST');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
   next();
 });
 
 // Connect to MongoDB
 mongoose.connect('mongodb://127.0.0.1:27017/train_booking', {
-  serverSelectionTimeoutMS: 5000, // Prevent indefinite connection hanging
+  serverSelectionTimeoutMS: 5000,
 })
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -49,9 +52,11 @@ initSeats();
 
 // Signup Route
 app.post('/api/signup', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password required' });
+  let { username, password } = req.body;
+  username = username?.trim();
+  password = password?.trim();
+  if (!username || !password || username.length < 3 || password.length < 6) {
+    return res.status(400).json({ error: 'Username (min 3) and password (min 6) required' });
   }
   try {
     const existingUser = await User.findOne({ username });
@@ -62,92 +67,128 @@ app.post('/api/signup', async (req, res) => {
     await user.save();
     res.status(201).json({ message: 'User created successfully' });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Database error: ' + err.message });
   }
 });
 
 // Login Route
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body;
+  let { username, password } = req.body;
+  username = username?.trim();
+  password = password?.trim();
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
   }
   try {
     const user = await User.findOne({ username });
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid username' });
-    }
+    if (!user) return res.status(401).json({ error: 'Invalid username' });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid password' });
-    }
+    if (!isMatch) return res.status(401).json({ error: 'Invalid password' });
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'secret_key', { expiresIn: '1h' });
     res.json({ token });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Database error: ' + err.message });
   }
 });
 
 // Middleware for authentication
 function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
-  console.log('Authorization Header:', authHeader); // Debugging log
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'No token provided' });
   }
-  
   const token = authHeader.split(' ')[1];
-
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret_key');
     req.userId = decoded.userId;
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
 
-// Get available seats
+// Get all seats (available and booked)
 app.get('/api/seats', async (req, res) => {
   try {
-    const seats = await Seat.find({ isBooked: false });
+    const seats = await Seat.find({});
     res.json(seats);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch seats' });
+    res.status(500).json({ error: 'Failed to fetch seats: ' + err.message });
   }
 });
 
-// Book seats
+// Get user's booked seats
+app.get('/api/my-seats', authMiddleware, async (req, res) => {
+  try {
+    const bookedSeats = await Seat.find({ userId: req.userId, isBooked: true });
+    res.json(bookedSeats);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch booked seats: ' + err.message });
+  }
+});
+
+// Book specific seats (manual selection)
 app.post('/api/book', authMiddleware, async (req, res) => {
-  const { numSeats } = req.body;
+  const { seatIds } = req.body;
   const userId = req.userId;
 
-  if (!numSeats || numSeats > 7 || numSeats < 1) {
-    return res.status(400).json({ error: 'Invalid number of seats' });
+  if (!seatIds || !Array.isArray(seatIds) || seatIds.length > 7 || seatIds.length < 1) {
+    return res.status(400).json({ error: 'Invalid seat selection (1-7 seats required)' });
   }
 
   try {
-    // Check for a row with enough seats
+    const seatsToBook = await Seat.find({
+      _id: { $in: seatIds },
+      isBooked: false,
+    });
+
+    if (seatsToBook.length !== seatIds.length) {
+      return res.status(400).json({ error: 'Some selected seats are already booked' });
+    }
+
+    await Seat.updateMany(
+      { _id: { $in: seatIds } },
+      { isBooked: true, userId }
+    );
+
+    res.json({ message: 'Seats booked successfully', seats: seatsToBook });
+  } catch (err) {
+    res.status(500).json({ error: 'Booking failed: ' + err.message });
+  }
+});
+
+// Book seats automatically based on input number
+app.post('/api/book-auto', authMiddleware, async (req, res) => {
+  const { numSeats } = req.body;
+  const userId = req.userId;
+
+  if (!numSeats || !Number.isInteger(numSeats) || numSeats > 7 || numSeats < 1) {
+    return res.status(400).json({ error: 'Number of seats must be an integer between 1 and 7' });
+  }
+
+  try {
+    // Find a row with enough consecutive available seats
     const rows = await Seat.aggregate([
       { $match: { isBooked: false } },
-      { $group: { _id: '$rowNumber', count: { $sum: 1 } } },
+      { $group: { _id: '$rowNumber', seats: { $push: '$$ROOT' }, count: { $sum: 1 } } },
       { $match: { count: { $gte: numSeats } } },
+      { $sort: { _id: 1 } }, // Sort by row number
       { $limit: 1 },
     ]);
 
     if (rows.length > 0) {
-      const row = rows[0]._id;
-      const seatsToBook = await Seat.find({ rowNumber: row, isBooked: false }).limit(numSeats);
+      const row = rows[0];
+      const seatsToBook = row.seats.slice(0, numSeats); // Take the first numSeats from this row
       await Seat.updateMany(
         { _id: { $in: seatsToBook.map(s => s._id) } },
         { isBooked: true, userId }
       );
-      res.json({ message: 'Seats booked in row ' + row, seats: seatsToBook });
+      res.json({ message: `Seats booked in row ${row._id}`, seats: seatsToBook });
     } else {
-      const availableSeats = await Seat.find({ isBooked: false }).limit(numSeats);
+      // Fallback: book nearby seats
+      const availableSeats = await Seat.find({ isBooked: false }).sort('seatNumber').limit(numSeats);
       if (availableSeats.length < numSeats) {
         return res.status(400).json({ error: 'Not enough seats available' });
       }
@@ -158,7 +199,21 @@ app.post('/api/book', authMiddleware, async (req, res) => {
       res.json({ message: 'Nearby seats booked', seats: availableSeats });
     }
   } catch (err) {
-    res.status(500).json({ error: 'Failed to book seats' });
+    res.status(500).json({ error: 'Booking failed: ' + err.message });
+  }
+});
+
+// Reset only user's seats
+app.post('/api/reset', authMiddleware, async (req, res) => {
+  const userId = req.userId;
+  try {
+    await Seat.updateMany(
+      { userId: userId, isBooked: true },
+      { isBooked: false, userId: null }
+    );
+    res.json({ message: 'Your seats reset successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Reset failed: ' + err.message });
   }
 });
 
