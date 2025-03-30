@@ -20,18 +20,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
-  serverSelectionTimeoutMS: 5000,
-})
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB connection error:', err));
-
-// Initialize seats
 async function initSeats() {
   try {
-    const seatCount = await Seat.countDocuments();
+    // Wait for MongoDB connection to be established
+    await new Promise((resolve, reject) => {
+      if (mongoose.connection.readyState === 1) {
+        return resolve();
+      }
+      mongoose.connection.once('connected', resolve);
+      mongoose.connection.once('error', reject);
+    });
+
+    console.log('Checking seat count...');
+    const seatCount = await Seat.countDocuments().maxTimeMS(15000); 
+    console.log(`Found ${seatCount} seats in the database`);
+
     if (seatCount === 0) {
+      console.log('Initializing seats...');
       const seats = [];
       for (let row = 1; row <= 11; row++) {
         for (let seat = 1; seat <= 7; seat++) {
@@ -43,12 +48,26 @@ async function initSeats() {
       }
       await Seat.insertMany(seats);
       console.log('80 seats initialized');
+    } else {
+      console.log('Seats already initialized, skipping...');
     }
   } catch (err) {
     console.error('Error initializing seats:', err);
+    
   }
 }
-initSeats();
+
+// Call initSeats after the connection is established
+mongoose.connect(process.env.MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+})
+  .then(() => {
+    console.log('MongoDB connected');
+    initSeats(); // Call initSeats after connection is confirmed
+  })
+  .catch(err => {
+    console.error('MongoDB connection error:', err);
+  });
 
 // Signup Route
 app.post('/api/signup', async (req, res) => {
