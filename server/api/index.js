@@ -3,8 +3,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const Seat = require('./models/Seat');
-const User = require('./models/User');
+const Seat = require('../models/Seat');
+const User = require('../models/User');
 
 const app = express();
 app.use(express.json());
@@ -21,7 +21,7 @@ app.use((req, res, next) => {
 });
 
 // Connect to MongoDB
-mongoose.connect('mongodb://127.0.0.1:27017/train_booking', {
+mongoose.connect(process.env.MONGODB_URI, {
   serverSelectionTimeoutMS: 5000,
 })
   .then(() => console.log('MongoDB connected'))
